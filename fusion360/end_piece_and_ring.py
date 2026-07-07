@@ -150,16 +150,42 @@ def run(context):
             return up.itemByName(name).value
 
         # -------------------------------------------------- idempotent rebuild
+        m = adsk.core.Matrix3D.create()
+
+        # Remove previously built components (Assembly Design doc) ...
         for i in range(root.occurrences.count - 1, -1, -1):
             oc = root.occurrences.item(i)
             if oc.component.name in ('EndPiece', 'TighteningRing'):
                 oc.deleteMe()
+        # ... or previously built bodies (single-component / Part Design doc)
+        for nm in ('end_piece', 'tightening_ring'):
+            b = root.bRepBodies.itemByName(nm)
+            if b:
+                b.deleteMe()
 
-        m = adsk.core.Matrix3D.create()
-        endComp = root.occurrences.addNewComponent(m).component
-        endComp.name = 'EndPiece'
-        ringComp = root.occurrences.addNewComponent(m).component
-        ringComp.name = 'TighteningRing'
+        # Separate components need an Assembly Design document. A "Part Design"
+        # document allows only ONE component, so fall back to building both parts
+        # as separate BODIES in the root component instead of hard-failing.
+        single_component = False
+
+        def make_container(name):
+            nonlocal single_component
+            try:
+                c = root.occurrences.addNewComponent(m).component
+                c.name = name
+                return c
+            except Exception:
+                single_component = True
+                return root
+
+        endComp = make_container('EndPiece')
+        ringComp = make_container('TighteningRing')
+        if single_component:
+            warnings.append(
+                'This document allows only ONE component (Part Design doc) -> built the '
+                'end piece and ring as two BODIES ("end_piece", "tightening_ring") in the '
+                'root component. For separate, individually printable components, run this in '
+                'an ASSEMBLY document (File > New > Assembly Design), then re-run.')
 
         # -------------------------------------------------- small helpers
         def offset_plane(comp, base, expr):
@@ -494,9 +520,10 @@ def run(context):
 
         lines_out = []
         lines_out.append('=== Bioreactor end piece + tightening ring ===')
-        lines_out.append('Components: EndPiece (body "%s"), TighteningRing (body "%s")'
-                         % (endComp.bRepBodies.item(0).name if endComp.bRepBodies.count else '?',
-                            ringComp.bRepBodies.item(0).name if ringComp.bRepBodies.count else '?'))
+        lines_out.append('Built as %s: bodies "%s" + "%s"'
+                         % ('two BODIES in the root component' if single_component
+                            else 'two separate components (EndPiece, TighteningRing)',
+                            endBody.name, ringBody.name))
         lines_out.append('Luer ports: %s' % ('female Luer-lock 6%% taper (mouth %.2f, small %.2f mm)'
                          % (val_mm('luer_mouth_ID'), val_mm('luer_small_dia')) if USE_LUER
                          else 'hose barbs for tubing ID %.2f mm' % val_mm('tubing_id')))

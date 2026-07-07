@@ -225,8 +225,11 @@ def run(context):
             ei.participantBodies = [body]
             return comp.features.extrudeFeatures.add(ei)
 
-        def revolve_profile(comp, pts_xz):
-            """Closed polyline in the XZ plane from world (x,0,z) points; returns the sketch."""
+        def revolve_profile(comp, pts_xz, axis_from_base=False):
+            """Closed polyline in the XZ plane from world (x,0,z) points.
+            Returns the sketch, or (sketch, base_line) if axis_from_base -- the
+            base line (last point -> first point) can be used as a revolve axis,
+            avoiding ConstructionAxes which some doc environments reject."""
             sk = comp.sketches.add(comp.xZConstructionPlane)
             sk.isComputeDeferred = True
             lines = sk.sketchCurves.sketchLines
@@ -235,9 +238,9 @@ def run(context):
             prev = first
             for i in range(2, len(sp)):
                 prev = lines.addByTwoPoints(prev.endSketchPoint, sp[i])
-            lines.addByTwoPoints(prev.endSketchPoint, first.startSketchPoint)
+            base = lines.addByTwoPoints(prev.endSketchPoint, first.startSketchPoint)
             sk.isComputeDeferred = False
-            return sk
+            return (sk, base) if axis_from_base else sk
 
         def revolve(comp, sk, axis, operation, body=None):
             prof = sk.profiles.item(0)
@@ -355,13 +358,13 @@ def run(context):
             sk = revolve_profile(endComp, [(0, 0), (mouth_r, 0), (small_r, tl), (0, tl)])
             revolve(endComp, sk, endComp.zConstructionAxis, FO.CutFeatureOperation, endBody)
 
-            # E7 -- ECS female Luer socket, revolve-cut about the stub's X axis
-            axInput = endComp.constructionAxes.createInput()
-            axInput.setByLine(adsk.core.InfiniteLine3D.create(
-                adsk.core.Point3D.create(0, 0, zecs), adsk.core.Vector3D.create(1, 0, 0)))
-            ecsAxis = endComp.constructionAxes.add(axInput)
-            sk = revolve_profile(endComp, [(etx, zecs), (etx, zecs + mouth_r),
-                                           (etx - tl, zecs + small_r), (etx - tl, zecs)])
+            # E7 -- ECS female Luer socket, revolve-cut about the stub's X axis.
+            # Revolve about the profile's own base edge (the z=z_ecs line), so we
+            # never call ConstructionAxes.add (rejected as "Environment is not
+            # supported" in some Fusion document environments).
+            sk, ecsAxis = revolve_profile(endComp, [(etx, zecs), (etx, zecs + mouth_r),
+                                                    (etx - tl, zecs + small_r), (etx - tl, zecs)],
+                                          axis_from_base=True)
             revolve(endComp, sk, ecsAxis, FO.CutFeatureOperation, endBody)
 
             # E7b -- ECS connecting channel from socket apex inward to the main bore
